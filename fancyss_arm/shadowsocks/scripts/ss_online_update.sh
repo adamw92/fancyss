@@ -170,6 +170,8 @@ decode_url_link(){
 	fi
 }
 
+urldecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; }
+
 add_ssr_servers(){
 	usleep 250000
 	ssrindex=$(($(dbus list ssconf_basic_|grep _name_ | cut -d "=" -f1|cut -d "_" -f4|sort -rn|head -n1)+1))
@@ -257,6 +259,35 @@ get_remote_config(){
 	[ -n "$group" ] && return 0 || return 1
 }
 
+get_ss_remote_config(){
+	new_sslink=$1
+	ss_remarks=$2
+	group=$3 
+	server=$(echo "$new_sslink" |awk -F':' '{print $1}'|awk -F'@' '{print $2}')
+	server_port=$(echo "$new_sslink" |awk -F':' '{print $2}')
+	userinfo=$(echo "$new_sslink" | awk -F'@' '{print $2}' | base64_decode)
+	encrypt_method=$(echo "$userinfo" | awk -F':' '{print $1}')
+	password=$(echo "$userinfo" | awk -F':' '{print $2}')
+	password=`echo $password|base64_encode`
+	remarks=`echo $password|urldecode`
+
+
+	[ -n "$group" ] && group_base64=`echo $group | base64_encode | sed 's/ -//g'`
+	[ -n "$server" ] && server_base64=`echo $server | base64_encode | sed 's/ -//g'`
+	#把全部服务器节点写入文件 /usr/share/shadowsocks/serverconfig/all_onlineservers
+	[ -n "$group" ] && [ -n "$server" ] && echo $server_base64 $group_base64 >> /tmp/all_onlineservers
+	#echo ------
+	#echo group: $group
+	#echo remarks: $remarks
+	#echo server: $server
+	#echo server_port: $server_port
+	#echo password: $password
+	#echo encrypt_method: $encrypt_method
+	#echo ------
+	echo "$group" >> /tmp/all_group_info.txt
+	[ -n "$group" ] && return 0 || return 1
+}
+
 update_config(){
 	#isadded_server=$(uci show shadowsocks | grep -c "server=\'$server\'")
 	isadded_server=$(cat /tmp/all_localservers | grep $group_base64 | awk '{print $1}' | grep -c $server_base64|head -n1)
@@ -295,6 +326,35 @@ update_config(){
 			echo_date 修改SSR节点：【$remarks】 && let updatenum+=1
 		else
 			echo_date SSR节点：【$remarks】 参数未发生变化，跳过！
+		fi
+	fi
+}
+
+update_ss_config(){
+	#isadded_server=$(uci show shadowsocks | grep -c "server=\'$server\'")
+	isadded_server=$(cat /tmp/all_localservers | grep $group_base64 | awk '{print $1}' | grep -c $server_base64|head -n1)
+	if [ "$isadded_server" == "0" ]; then
+		add_ss_servers
+		let addnum+=1
+	else
+		# 如果在本地的订阅节点中没找到该节点，检测下配置是否更改，如果更改，则更新配置
+		index=$(cat /tmp/all_localservers| grep $group_base64 | grep $server_base64 |awk '{print $3}'|head -n1)
+		local_remarks=$(dbus get ssconf_basic_name_$index)
+		local_server_port=$(dbus get ssconf_basic_port_$index)
+		local_encrypt_method=$(dbus get ssconf_basic_method_$index)
+		local_password=$(dbus get ssconf_basic_password_$index)
+		#local_group=$(dbus get ssconf_basic_group_$index)
+
+		local i=0
+		dbus set ssconf_basic_mode_$index="$ssr_subscribe_mode"
+		[ "$local_remarks" != "$remarks" ] && dbus set ssconf_basic_name_$index=$remarks
+		[ "$local_server_port" != "$server_port" ] && dbus set ssconf_basic_port_$index=$server_port && let i+=1
+		[ "$local_encrypt_method" != "$encrypt_method" ] && dbus set ssconf_basic_method_$index=$encrypt_method && let i+=1
+		[ "$local_password" != "$password" ] && dbus set ssconf_basic_password_$index=$password && let i+=1
+		if [ "$i" -gt "0" ];then
+			echo_date 修改SS节点：【$remarks】 && let updatenum+=1
+		else
+			echo_date SS节点：【$remarks】 参数未发生变化，跳过！
 		fi
 	fi
 }
@@ -669,7 +729,39 @@ get_oneline_rule_now(){
 		NODE_FORMAT1=`cat /tmp/ssr_subscribe_file_temp1.txt | grep -E "^ss://"`
 		NODE_FORMAT2=`cat /tmp/ssr_subscribe_file_temp1.txt | grep -E "^ssr://"`
 		NODE_FORMAT3=`cat /tmp/ssr_subscribe_file_temp1.txt | grep -E "^vmess://"`
-		if [ -n "$NODE_FORMAT2" ];then
+		if [ -n "$NODE_FORMAT1" ];then
+			# SS 订阅
+
+			NODE_NU=`cat /tmp/ssr_subscribe_file_temp1.txt | grep -c "ss://"`
+			echo_date 检测到ss节点格式，共计$NODE_NU个节点...
+
+			# use domain as group
+			newss_group_tmp=`echo $ssr_subscribe_link|awk -F'[/:]' '{print $4}'`	
+			# 储存对应订阅链接的group信息
+			dbus set ss_online_group_$z=$newss_group_tmp
+			echo $newss_group_tmp >> /tmp/group_info.txt	
+
+			urllinks=$(decode_url_link `cat /tmp/ssr_subscribe_file.txt` | sed 's/ss:\/\///g')
+			for link in $urllinks
+			do
+				new_sslink=`echo -n "$link" | awk -F'#' '{print $1}'`
+				ss_remarks=`echo -n "$link" | awk -F'#' '{print $2}'`
+				get_ss_remote_config "$new_sslink" "$ss_remarks" "$newss_group_tmp" 
+				[ "$?" == "0" ] && update_ss_config || echo_date "检测到一个错误节点，已经跳过！"
+			done	
+
+
+			# 去除订阅服务器上已经删除的节点
+			del_none_exist
+			# 节点重新排序
+			remove_node_gap
+			USER_ADD=$(($(dbus list ssconf_basic_|grep _name_|wc -l) - $(dbus list ssconf_basic_|grep _group_|wc -l))) || 0
+			ONLINE_GET=$(dbus list ssconf_basic_|grep _group_|wc -l) || 0
+			echo_date "本次更新订阅来源 【$group】， 新增节点 $addnum 个，修改 $updatenum 个，删除 $delnum 个；"
+			echo_date "现共有自添加SS节点：$USER_ADD 个。"
+			echo_date "现共有订阅SS节点：$ONLINE_GET 个。"
+			echo_date "在线订阅列表更新完成!"
+		elif [ -n "$NODE_FORMAT2" ];then
 			# SSR 订阅
 			NODE_NU=`cat /tmp/ssr_subscribe_file_temp1.txt | grep -c "ssr://"`
 			echo_date 检测到ssr节点格式，共计$NODE_NU个节点...
@@ -752,9 +844,7 @@ get_oneline_rule_now(){
 			echo_date "现共有自添加节点：$USER_ADD 个。"
 			echo_date "现共有订阅SSR/v2ray节点：$ONLINE_GET 个。"
 			echo_date "在线订阅列表更新完成!"
-		elif [ -n "$NODE_FORMAT1" ];then
-			echo_date 暂时不支持ss节点订阅...
-			echo_date 退出订阅程序...
+
 		else
 			return 3
 		fi
