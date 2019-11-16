@@ -749,7 +749,7 @@ get_oneline_rule_now(){
 			echo_date "现共有订阅SS节点：$ONLINE_GET 个。"
 			echo_date "在线订阅列表更新完成!"
         
-        elif [ -n "$NODE_FORMAT2" ];then
+        	elif [ -n "$NODE_FORMAT2" ];then
 			# SSR 订阅
 			NODE_NU=`cat /tmp/ssr_subscribe_file_temp1.txt | grep -c "ssr://"`
 			echo_date 检测到ssr节点格式，共计$NODE_NU个节点...
