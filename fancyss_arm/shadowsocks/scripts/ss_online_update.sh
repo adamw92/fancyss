@@ -170,6 +170,8 @@ decode_url_link(){
 	fi
 }
 
+urldecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; }
+
 add_ssr_servers(){
 	usleep 250000
 	ssrindex=$(($(dbus list ssconf_basic_|grep _name_ | cut -d "=" -f1|cut -d "_" -f4|sort -rn|head -n1)+1))
@@ -267,7 +269,7 @@ get_ss_remote_config(){
 	encrypt_method=$(echo "$userinfo" | awk -F':' '{print $1}')
 	password=$(echo "$userinfo" | awk -F':' '{print $2}')
 	password=`echo $password|base64_encode`
-	remarks=`echo $password|urldecode`
+	remarks=$(echo "$ss_remarks" | urldecode)
 
 
 	[ -n "$group" ] && group_base64=`echo $group | base64_encode | sed 's/ -//g'`
