@@ -220,8 +220,7 @@ get_ss_remote_config(){
 	encrypt_method=$(echo "$userinfo" | awk -F':' '{print $1}')
 	password=$(echo "$userinfo" | awk -F':' '{print $2}')
 	password=`echo $password | base64_encode | sed 's/\s//g'`
-	remarks=`echo -n "$ss_remarks" | sed 's/.*[0-9]#''//1' | sed 's/%20/ /g'`
-
+	remarks=`echo -n "$ss_remarks" | sed 's/\\/\\\\/g;s/\(%\)\([0-9a-fA-F][0-9a-fA-F]\)/\\x\2/g')"\n"`
 
 	[ -n "$group" ] && group_base64=`echo $group | base64_encode | sed 's/ -//g'`
 	[ -n "$server" ] && server_base64=`echo $server | base64_encode | sed 's/ -//g'`
