@@ -117,8 +117,6 @@ decode_url_link(){
 	fi
 }
 
-urldecode() { : "${*//+/ }"; echo -e "${_//%/\\x}"; }
-
 add_ssr_servers(){
 	usleep 100000
 	ssrindex=$(($(dbus list ssconf_basic_|grep _name_ | cut -d "=" -f1|cut -d "_" -f4|sort -rn|head -n1)+1))
@@ -138,10 +136,12 @@ add_ssr_servers(){
 }
 
 add_ss_servers(){
+	usleep 100000
 	ssindex=$(($(dbus list ssconf_basic_|grep _name_ | cut -d "=" -f1|cut -d "_" -f4|sort -rn|head -n1)+1))
 	echo_date 添加SS节点：$remarks
 	dbus set ssconf_basic_name_$ssindex=$remarks
-    dbus set ssconf_basic_mode_$ssrindex=$ssr_subscribe_mode
+	[ -z "$1" ] && dbus set ssconf_basic_group_$ssindex=$group
+    	dbus set ssconf_basic_mode_$ssrindex=$ssr_subscribe_mode
 	dbus set ssconf_basic_server_$ssindex=$server
 	dbus set ssconf_basic_port_$ssindex=$server_port
 	dbus set ssconf_basic_method_$ssindex=$encrypt_method
@@ -216,11 +216,11 @@ get_ss_remote_config(){
 	group=$3 
 	server=$(echo "$new_sslink" |awk -F':' '{print $1}'|awk -F'@' '{print $2}')
 	server_port=$(echo "$new_sslink" |awk -F':' '{print $2}')
-	userinfo=$(echo "$new_sslink" | awk -F'@' '{print $2}' | base64_decode)
+	userinfo=$(echo "$new_sslink" | awk -F'@' '{print $1}' | base64_decode)
 	encrypt_method=$(echo "$userinfo" | awk -F':' '{print $1}')
 	password=$(echo "$userinfo" | awk -F':' '{print $2}')
 	password=`echo $password | base64_encode | sed 's/\s//g'`
-	remarks=$(echo "$ss_remarks" | urldecode)
+	remarks=`echo -n "$ss_remarks" | sed 's/.*[0-9]#''//1' | sed 's/%20/ /g'`
 
 
 	[ -n "$group" ] && group_base64=`echo $group | base64_encode | sed 's/ -//g'`
@@ -306,19 +306,8 @@ update_ss_config(){
 		let addnum+=1
 	else
 		# 如果在本地的订阅节点中没找到该节点，检测下配置是否更改，如果更改，则更新配置
-		index_line=$(cat /tmp/all_localservers| grep $group_base64 | grep $server_base64 |awk '{print $3}'|wc -l)
-		if [ "$index_line" == "1" ];then
-			local index=$(cat /tmp/all_localservers| grep $group_base64 | grep $server_base64 |awk '{print $3}'|sed -n "$index_line p")
-		else
-			# 如果有些机场有域名重复的节点，如一些用于流量提示和过期日期提醒的假节点，把同名节点序号写进文件后依次去取节点号
-			local tmp_file=$(echo $server_base64|sed 's/\=//g')
-			if [ ! -f /tmp/multi_${tmp_file}.txt ] || [ $(cat /tmp/multi_${tmp_file}.txt |wc -l) == 0 ];then
-				# 节点的base64值，去掉"="后，作为文件名写入/tmp，后面遇到该节点（server值相同的节点）就能从里面取值啦
-				cat /tmp/all_localservers| grep $group_base64 | grep $server_base64 |awk '{print $3}' > /tmp/multi_${tmp_file}.txt
-			fi
-			local index=$(cat /tmp/multi_${tmp_file}.txt|sed -n '1 p')
-			sed -i '1d' /tmp/multi_${tmp_file}.txt
-		fi
+		index_line=$(cat /tmp/all_localservers| grep $group_base64 | grep $server_base64 |awk '{print $3}'|head -n1)
+
 		local_remarks=$(dbus get ssconf_basic_name_$index)
 		local_server_port=$(dbus get ssconf_basic_port_$index)
 		local_encrypt_method=$(dbus get ssconf_basic_method_$index)
@@ -734,8 +723,12 @@ get_oneline_rule_now(){
 			do
 				new_sslink=`echo -n "$link" | awk -F'#' '{print $1}'`
 				ss_remarks=`echo -n "$link" | awk -F'#' '{print $2}'`
-				get_ss_remote_config "$new_sslink" "$ss_remarks" "$newss_group_tmp" 
-				[ "$?" == "0" ] && update_ss_config || echo_date "检测到一个错误节点，已经跳过！"
+				if [ -n "$new_sslink" ];then
+					get_ss_remote_config "$new_sslink" "$ss_remarks" "$newss_group_tmp" 
+					[ "$?" == "0" ] && update_ss_config || echo_date "检测到一个错误节点，已经跳过！"
+				else
+					echo_date "解析失败！！！"
+				fi
 			done	
 
 			# 去除订阅服务器上已经删除的节点
