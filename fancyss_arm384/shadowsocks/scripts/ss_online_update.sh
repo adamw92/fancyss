@@ -120,7 +120,7 @@ decode_url_link(){
 add_ssr_servers(){
 	usleep 100000
 	ssrindex=$(($(dbus list ssconf_basic_|grep _name_ | cut -d "=" -f1|cut -d "_" -f4|sort -rn|head -n1)+1))
-	dbus set ssconf_basic_name_$ssrindex=$remarks
+	dbus set ssconf_basic_name_$ssrindex="$remarks"
 	[ -z "$1" ] && dbus set ssconf_basic_group_$ssrindex=$group
 	dbus set ssconf_basic_mode_$ssrindex=$ssr_subscribe_mode
 	dbus set ssconf_basic_server_$ssrindex=$server
@@ -132,22 +132,22 @@ add_ssr_servers(){
 	dbus set ssconf_basic_type_$ssrindex="1"
 	[ -n "$1" ] && dbus set ssconf_basic_rss_obfs_param_$ssrindex=$obfsparam
 	dbus set ssconf_basic_password_$ssrindex=$password
-	echo_date SSR节点：新增加 【$remarks】 到节点列表第 $ssrindex 位。
+	echo_date SSR节点：新增加 【"$remarks"】 到节点列表第 $ssrindex 位。
 }
 
 add_ss_servers(){
 	usleep 100000
 	ssindex=$(($(dbus list ssconf_basic_|grep _name_ | cut -d "=" -f1|cut -d "_" -f4|sort -rn|head -n1)+1))
-	echo_date 添加SS节点：$remarks
-	dbus set ssconf_basic_name_$ssindex=$remarks
-	[ -z "$1" ] && dbus set ssconf_basic_group_$ssindex=$group
+	echo_date "添加SS节点：$remarks"
+	dbus set ssconf_basic_name_$ssindex="$remarks"
+	[ -z "$1" ] && dbus set ssconf_basic_group_$ssindex="$group"
     	dbus set ssconf_basic_mode_$ssrindex=$ssr_subscribe_mode
-	dbus set ssconf_basic_server_$ssindex=$server
-	dbus set ssconf_basic_port_$ssindex=$server_port
-	dbus set ssconf_basic_method_$ssindex=$encrypt_method
-	dbus set ssconf_basic_password_$ssindex=$password
+	dbus set ssconf_basic_server_$ssindex="$server"
+	dbus set ssconf_basic_port_$ssindex="$server_port"
+	dbus set ssconf_basic_method_$ssindex="$encrypt_method"
+	dbus set ssconf_basic_password_$ssindex="$password"
 	dbus set ssconf_basic_type_$ssindex="0"
-	echo_date SS节点：新增加 【$remarks】 到节点列表第 $ssrindex 位。
+	echo_date "SS节点：新增加 【$remarks】 到节点列表第 $ssindex 位。"
 }
 
 get_remote_config(){
@@ -211,16 +211,16 @@ get_remote_config(){
 }
 
 get_ss_remote_config(){
-	new_sslink=$1
-	ss_remarks=$2
-	group=$3 
+	sslink="$1"
+	group="$2"				
+	new_sslink=`echo -n "$sslink" | awk -F'#' '{print $1}'`
+	remarks=`echo -n "$sslink" | sed 's/.*[0-9]#''//1' | sed 's/%20/ /g'`
 	server=$(echo "$new_sslink" |awk -F':' '{print $1}'|awk -F'@' '{print $2}')
 	server_port=$(echo "$new_sslink" |awk -F':' '{print $2}')
 	userinfo=$(echo "$new_sslink" | awk -F'@' '{print $1}' | base64_decode)
 	encrypt_method=$(echo "$userinfo" | awk -F':' '{print $1}')
 	password=$(echo "$userinfo" | awk -F':' '{print $2}')
 	password=`echo $password | base64_encode | sed 's/\s//g'`
-	remarks=`echo -n "$ss_remarks" | sed 's/\\/\\\\/g;s/\(%\)\([0-9a-fA-F][0-9a-fA-F]\)/\\x\2/g')"\n"`
 
 	[ -n "$group" ] && group_base64=`echo $group | base64_encode | sed 's/ -//g'`
 	[ -n "$server" ] && server_base64=`echo $server | base64_encode | sed 's/ -//g'`
@@ -720,10 +720,9 @@ get_oneline_rule_now(){
 			urllinks=$(decode_url_link `cat /tmp/ssr_subscribe_file.txt` | sed 's/ss:\/\///g')
 			for link in $urllinks
 			do
-				new_sslink=`echo -n "$link" | awk -F'#' '{print $1}'`
-				ss_remarks=`echo -n "$link" | awk -F'#' '{print $2}'`
-				if [ -n "$new_sslink" ];then
-					get_ss_remote_config "$new_sslink" "$ss_remarks" "$newss_group_tmp" 
+				sslink=`echo -n "$link"`
+				if [ -n "$sslink" ];then
+					get_ss_remote_config "$sslink" "$newss_group_tmp" 
 					[ "$?" == "0" ] && update_ss_config || echo_date "检测到一个错误节点，已经跳过！"
 				else
 					echo_date "解析失败！！！"
@@ -1058,10 +1057,9 @@ add() {
 					new_sslink=`echo -n "$ssrlink" | sed 's/ss:\/\///g'`
 					remarks='AddByLink'
 				fi
-				#decode_sslink=$(decode_url_link $new_sslink)
-                decode_sslink="$new_sslink"
-				get_ss_config $decode_sslink
-				add_ss_servers
+				#decode_sslink=$(decourl_link $new_sslink)
+                				decode_sslink="$new_sslink"
+				get_ss_config d_ss_servers
 			fi
 		fi
 		dbus remove ss_base64_links
