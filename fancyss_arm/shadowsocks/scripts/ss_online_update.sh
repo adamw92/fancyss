@@ -194,7 +194,8 @@ add_ss_servers(){
 	ssindex=$(($(dbus list ssconf_basic_|grep _name_ | cut -d "=" -f1|cut -d "_" -f4|sort -rn|head -n1)+1))
 	echo_date "添加SS节点：$remarks"
 	dbus set ssconf_basic_name_$ssindex="$remarks"
-	dbus set ssconf_basic_mode_$ssindex="2"
+	[ -z "$1" ] && dbus set ssconf_basic_group_$ssindex="$group"
+    	dbus set ssconf_basic_mode_$ssrindex=$ssr_subscribe_mode
 	dbus set ssconf_basic_server_$ssindex="$server"
 	dbus set ssconf_basic_port_$ssindex="$server_port"
 	dbus set ssconf_basic_method_$ssindex="$encrypt_method"
@@ -260,17 +261,15 @@ get_remote_config(){
 }
 
 get_ss_remote_config(){
-	new_sslink=$1
-	ss_remarks=$2
-	group=$3 
+	new_sslink="$1"
+	remarks="$2"
+	group="$3"
 	server=$(echo "$new_sslink" |awk -F':' '{print $1}'|awk -F'@' '{print $2}')
 	server_port=$(echo "$new_sslink" |awk -F':' '{print $2}')
-	userinfo=$(echo "$new_sslink" | awk -F'@' '{print $2}' | base64_decode)
+	userinfo=$(echo "$new_sslink" | awk -F'@' '{print $1}' | base64_decode)
 	encrypt_method=$(echo "$userinfo" | awk -F':' '{print $1}')
 	password=$(echo "$userinfo" | awk -F':' '{print $2}')
-	password=`echo $password|base64_encode`
-	remarks=$(echo "$ss_remarks" | urldecode)
-
+	password=`echo $password | base64_encode | sed 's/\s//g'`
 
 	[ -n "$group" ] && group_base64=`echo $group | base64_encode | sed 's/ -//g'`
 	[ -n "$server" ] && server_base64=`echo $server | base64_encode | sed 's/ -//g'`
@@ -337,20 +336,23 @@ update_ss_config(){
 		add_ss_servers
 		let addnum+=1
 	else
-		# 如果在本地的订阅节点中没找到该节点，检测下配置是否更改，如果更改，则更新配置
+		# 如果在本地的订阅节点中已经有该节点（用group和server去判断），检测下配置是否更改，如果更改，则更新配置
 		index=$(cat /tmp/all_localservers| grep $group_base64 | grep $server_base64 |awk '{print $3}'|head -n1)
-		local_remarks=$(dbus get ssconf_basic_name_$index)
-		local_server_port=$(dbus get ssconf_basic_port_$index)
-		local_encrypt_method=$(dbus get ssconf_basic_method_$index)
-		local_password=$(dbus get ssconf_basic_password_$index)
-		#local_group=$(dbus get ssconf_basic_group_$index)
-
 		local i=0
 		dbus set ssconf_basic_mode_$index="$ssr_subscribe_mode"
-		[ "$local_remarks" != "$remarks" ] && dbus set ssconf_basic_name_$index=$remarks
+		local_remarks=$(dbus get ssconf_basic_name_$index)
+		[ "$local_remarks" != "$remarks" ] && dbus set ssconf_basic_name_$index=$remarks && let i+=1
+		local_server=$(dbus get ssconf_basic_server_$index)
+		[ "$local_server" != "$server" ] && dbus set ssconf_basic_server_$index=$server && let i+=1
+		local_server_port=$(dbus get ssconf_basic_port_$index)
 		[ "$local_server_port" != "$server_port" ] && dbus set ssconf_basic_port_$index=$server_port && let i+=1
+		local_encrypt_method=$(dbus get ssconf_basic_method_$index)
 		[ "$local_encrypt_method" != "$encrypt_method" ] && dbus set ssconf_basic_method_$index=$encrypt_method && let i+=1
+		local_password=$(dbus get ssconf_basic_password_$index)
 		[ "$local_password" != "$password" ] && dbus set ssconf_basic_password_$index=$password && let i+=1
+		local_group=$(dbus get ssconf_basic_group_$index)
+		[ "$local_group" != "$group" ] && dbus set ssconf_basic_group_$index=$group && let i+=1
+
 		if [ "$i" -gt "0" ];then
 			echo_date 修改SS节点：【$remarks】 && let updatenum+=1
 		else
@@ -741,13 +743,17 @@ get_oneline_rule_now(){
 			dbus set ss_online_group_$z=$newss_group_tmp
 			echo $newss_group_tmp >> /tmp/group_info.txt	
 
-			urllinks=$(decode_url_link `cat /tmp/ssr_subscribe_file.txt` | sed 's/ss:\/\///g')
+			urllinks=`cat /tmp/ssr_subscribe_file.txt | sed 's/ss:\/\///g'`
 			for link in $urllinks
 			do
 				new_sslink=`echo -n "$link" | awk -F'#' '{print $1}'`
-				ss_remarks=`echo -n "$link" | awk -F'#' '{print $2}'`
-				get_ss_remote_config "$new_sslink" "$ss_remarks" "$newss_group_tmp" 
-				[ "$?" == "0" ] && update_ss_config || echo_date "检测到一个错误节点，已经跳过！"
+				remarks=$(printf $(echo -n $link | awk -F'#' '{print $2}' | sed 's/\\/\\\\/g;s/\(%\)\([0-9a-fA-F][0-9a-fA-F]\)/\\x\2/g')"\n")
+				if [ -n "$sslink" ];then
+					get_ss_remote_config "$new_sslink" "$remarks" "$newss_group_tmp"  
+					[ "$?" == "0" ] && update_ss_config || echo_date "检测到一个错误节点，已经跳过！"
+				else
+					echo_date "解析失败！！！"
+				fi
 			done	
 
 
@@ -842,7 +848,7 @@ get_oneline_rule_now(){
 			ONLINE_GET=$(dbus list ssconf_basic_|grep _group_|wc -l) || 0
 			echo_date "本次更新订阅来源 【$v2ray_group】， 新增节点 $addnum 个，修改 $updatenum 个，删除 $delnum 个；"
 			echo_date "现共有自添加节点：$USER_ADD 个。"
-			echo_date "现共有订阅SSR/v2ray节点：$ONLINE_GET 个。"
+			echo_date "现共有订阅SS/SSR/v2ray节点：$ONLINE_GET 个。"
 			echo_date "在线订阅列表更新完成!"
 
 		else
@@ -1027,10 +1033,10 @@ start_update(){
 
 get_ss_config(){
 	decode_link=$1
-	server=$(echo "$decode_link" |awk -F':' '{print $1}'|awk -F'@' '{print $2}')
-	server_port=$(echo "$decode_link" |awk -F':' '{print $2}')
-	encrypt_method=$(echo "$decode_link" |awk -F':' '{print $1}'|awk -F'@' '{print $1}' | base64_decode |awk -F':' '{print $1}')
-	password=$(echo "$decode_link" |awk -F':' '{print $1}'|awk -F'@' '{print $1}' | base64_decode |awk -F':' '{print $2}')
+	server=$(echo "$decode_link" |awk -F':' '{print $2}'|awk -F'@' '{print $2}')
+	server_port=$(echo "$decode_link" |awk -F':' '{print $3}')
+	encrypt_method=$(echo "$decode_link" |awk -F':' '{print $1}')
+	password=$(echo "$decode_link" |awk -F':' '{print $2}'|awk -F'@' '{print $1}')
 	password=`echo $password|base64_encode`
 }
 
@@ -1066,13 +1072,13 @@ add() {
 				echo_date 检测到SS链接...开始尝试解析...
 				if [ -n "`echo -n "$ssrlink" | grep "#"`" ];then
 					new_sslink=`echo -n "$ssrlink" | awk -F'#' '{print $1}' | sed 's/ss:\/\///g'`
-					remarks=`echo -n "$ssrlink" | sed 's/.*[0-9]#''//1' | sed 's/%20/ /g'`
+					remarks=$(printf $(echo -n $ssrlink | awk -F'#' '{print $2}' | sed 's/\\/\\\\/g;s/\(%\)\([0-9a-fA-F][0-9a-fA-F]\)/\\x\2/g')"\n")
 				else
 					new_sslink=`echo -n "$ssrlink" | sed 's/ss:\/\///g'`
 					remarks='AddByLink'
 				fi
-				# decode_sslink=$(decode_url_link "$new_sslink")
-				decode_sslink="$new_sslink"
+				decode_sslink=$(decode_url_link "$new_sslink")
+				# decode_sslink="$new_sslink"
 				get_ss_config "$decode_sslink"
 				add_ss_servers
 			fi
